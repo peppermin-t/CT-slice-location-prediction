@@ -40,5 +40,29 @@ print(np.where(ft_const))
 print(ft_dup)
 
 
-def fit_linreg(X, yy, alpha):
-	pass
+def fit_linreg(X, yy, alpha=30):
+	D = X.shape[0]
+	phi = np.hstack([np.ones((D, 1)), X])
+	diag_aug = np.identity(phi.shape[1])
+	diag_aug[0, 0] = 0
+	phi_reg = np.vstack([phi, np.sqrt(alpha) * diag_aug])
+	y_reg = np.hstack([yy, np.zeros(phi.shape[1])])
+
+	w_fit = np.linalg.lstsq(phi_reg, y_reg, rcond=None)[0]
+
+	ww, bb = w_fit[1: ], w_fit[0]
+
+	return ww, bb
+
+from support_code import fit_linreg_gradopt
+
+def get_RMSE(func, X, yy, alpha=30):
+	ww, bb = func(X, yy, alpha)
+	yy_fit = X.dot(ww) + bb
+	return np.sqrt(np.mean((yy - yy_fit) ** 2))
+
+alpha = 30
+print(get_RMSE(fit_linreg, X_train, y_train, alpha))
+print(get_RMSE(fit_linreg_gradopt, X_train, y_train, alpha))
+print(get_RMSE(fit_linreg, X_val, y_val, alpha))
+print(get_RMSE(fit_linreg_gradopt, X_val, y_val, alpha))
