@@ -380,6 +380,7 @@ print(train_nn_reg(X_test, y_test, best_alpha, uni_init))
 
 print("####################")
 print("Question 6:")
-# add basis functions in phi_x (feature engineering)
-# modify K (hidden layers)
-# change PI
+# possible modifications:
+# 1. Adding basis functions in phi_x (feature engineering)
+# 2. optimizing K (hidden layer size)
+# 3. change PI
