@@ -1,6 +1,12 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy.stats import norm
+from tqdm import tqdm
 
+from support_code import *
+
+# Set seed to get consistent results for comparison
+np.random.seed(10)
 
 # Retrieve pre-processed data
 data = np.load('ct_data.npz')
@@ -8,21 +14,21 @@ X_train = data['X_train']; X_val = data['X_val']; X_test = data['X_test']
 y_train = data['y_train']; y_val = data['y_val']; y_test = data['y_test']
 
 
-# print("####################")
-# print("Question 1a:")
-# # Verify the length of training and validation set
-# print(len(y_train))
-# print(len(y_val))
+print("####################")
+print("Question 1a:")
+# Verify the length of training and validation set
+print(len(y_train))
+print(len(y_val))
 
-# # Verify that the mean of training positions is 0
-# print(np.allclose(np.mean(y_train), 0))
-# # Verify that the mean of validation positions is not 0
-# print(np.allclose(np.mean(y_val), 0))
-# # the standard error of the validation positions
-# print(np.mean(y_val), np.std(y_val) / np.sqrt(len(y_val)))
-# # the standard error of the first 5785 entries of training positions
-# y_part = y_train[: 5785]
-# print(np.mean(y_part), np.std(y_part) / np.sqrt(len(y_part)))
+# Verify that the mean of training positions is 0
+print(np.allclose(np.mean(y_train), 0))
+# Verify that the mean of validation positions is not 0
+print(np.allclose(np.mean(y_val), 0))
+# the standard error of the validation positions
+print(np.mean(y_val), np.std(y_val) / np.sqrt(len(y_val)))
+# the standard error of the first 5785 entries of training positions
+y_part = y_train[: 5785]
+print(np.mean(y_part), np.std(y_part) / np.sqrt(len(y_part)))
 
 
 print("####################")
@@ -83,7 +89,6 @@ def fit_linreg(X, yy, alpha=30):
 
     return ww, bb
 
-from support_code import *
 
 def get_RMSE_lin(ww, bb, X, yy):
     '''
@@ -191,8 +196,7 @@ print(get_RMSE_lin(ww_lin, bb_lin, prob_val, y_val))
 
 print("####################")
 print("Question 4:")
-# Set seed to get consistent results for comparison
-np.random.seed(10)
+
 def fit_nn(X, yy, alpha, init):
     """
     fit a regularized neural network model with gradient opt
@@ -267,9 +271,6 @@ print(get_RMSE_nn(params_nn_b, X_val, y_val))
 
 print("####################")
 print("Question 5:")
-
-from scipy.stats import norm
-from tqdm import tqdm
 
 def train_nn_reg(X, yy, alpha, init):
     '''
@@ -384,3 +385,104 @@ print("Question 6:")
 # 1. Adding basis functions in phi_x (feature engineering)
 # 2. optimizing K (hidden layer size)
 # 3. change PI
+
+# Experiment 1
+
+D = X_train.shape[1]
+alpha = 12.44
+
+for K in [22, 25, 30, 40, 50]:
+    # Create a sensible random initialization of the parameters (uniform(-1, 1) here)
+    uni_init = (np.random.uniform(-1, 1, K), np.random.uniform(-1, 1),
+                np.random.uniform(-1, 1, (K, D)), np.random.uniform(-1, 1, K))
+    # nn fit with sensible random initialization
+    params_nn_a = fit_nn(X_train, y_train, alpha, init=uni_init)
+    # Report the RMSE of training set
+    print(f"Train RMSE for K = {K}, Train RMSE = {get_RMSE_nn(params_nn_a, X_train, y_train)}")
+    # Report the RMSE of validation set
+    RMSE_nn = get_RMSE_nn(params_nn_a, X_val, y_val)
+    print(
+        f"Validation RMSE for K = {K}, Val RMSE = {RMSE_nn}")
+
+# Experiment 2
+
+def train_nn_reg_k(X, yy, K):
+    # generate init based on K
+    init = (np.random.uniform(-1, 1, K), np.random.uniform(-1, 1),
+            np.random.uniform(-1, 1, (K, D)), np.random.uniform(-1, 1, K))
+    # fit the neural network based on new init
+    params = fit_nn(X_train, y_train, 12.44, init)
+    # calculate the RMSE on X and yy
+    return get_RMSE_nn(params, X, yy)
+def bayes_optim_k(k_rest, k_obs, RMSE_base, init=pretrain_init, num_iter=5):
+    # Obtain the y values for the beginning observed alphas
+    y_obs = []
+    for i in tqdm(range(len(k_obs))):
+        y_obs.append(np.log(RMSE_base) -
+                     np.log(train_nn_reg_k(X_val, y_val, k_obs[i])))
+
+    # Create PIs to record the max PI for each iteration
+    PIs = []
+    for i in tqdm(range(num_iter)):
+        # Calculate the gaussian process prosterior for the rest K
+        rest_mu, rest_cov = gp_post_par(k_rest, k_obs, np.array(y_obs))
+
+        # Obtain the PI values for the unobserved alphas
+        PI = getPI(rest_mu, rest_cov, y_obs)
+
+        # pick the next K accordding to the PI values for each of the unobserved Ks
+        # and update k_obs, k_rest, and PIs
+        k_next_id = np.argmax(PI)
+        k_obs = np.append(k_obs, k_rest[k_next_id])
+        k_rest = np.delete(k_rest, k_next_id)
+        PIs.append(PI[k_next_id])
+
+        # Observe the y value for the picked alpha
+        y_obs.append(np.log(RMSE_base) -
+                     np.log(train_nn_reg_k(X_val, y_val, k_obs[-1])))
+
+    # Retrieve the best alpha according by finding which gives the maximum y_obs
+    # assert len(k_obs) == len(y_obs)
+    best_k = k_obs[np.argmax(y_obs)]
+
+    # a_obs[3:] corresponds to the newly added alphas
+    return best_k, PIs, k_obs[3:]
+# Create the possible Ks on the specific range
+Ks = np.arange(1, 100, 1) 
+# randomly select three beginning Ks from Ks
+K_obs = np.random.choice(Ks, 3, replace=False)
+# Report the beginning Ks
+print("Beginning Ks: ", K_obs)
+# Delete the observed Ks from the unobserved ones to get K_rest
+K_rest = np.setdiff1d(Ks, K_obs)
+# Do bayesian optimization on the given setting (RMSE_nn_val, uni_init from Q4)
+RMSE_base = 0.2750728638143858
+best_K, PIs, new_Ks = bayes_optim_k(
+    K_rest, K_obs, RMSE_base, init=pretrain_init, num_iter=5)
+# Report the maximum probability of improvement together with its Ks
+# for each of the five iterations
+print("PIs:         ", PIs)
+print("New Ks:  ", new_Ks)
+# Report the best alpha
+print("Best K:  ", best_K)
+
+# Report the RMSE on validation set and test set based on the optimized K
+print(train_nn_reg_k(X_val, y_val, best_K))
+print(train_nn_reg_k(X_test, y_test, best_K))
+
+# Experiment 3
+
+def rbf_features(X, centers, h):
+    # RBFs (x-c)^2
+    c = np.sum((X[:, np.newaxis] - centers)**2, axis=-1)
+    # Apply the RBF transformation
+    return np.exp(-c/(h**2))
+
+# Choose 30 centers for the RBFs
+centers = X_train[np.random.choice(X_train.shape[0], 30, replace=False)]
+# Choose a K value
+h = 10
+
+# Apply the RBF transformation
+X_transformed = rbf_features(X_train, centers, h)
+X_transformed_val = rbf_features(X_val, centers, h)
